@@ -3358,6 +3358,24 @@ async function pasteCardText() {
   }
 }
 
+async function uploadMseSet() {
+	try {
+		var input = document.createElement('input');
+		input.type = 'file';
+
+		input.onchange = e => {
+			// Get the file reference
+			var set = new MseSet(e.target.files[0]);
+			// set.setFrame();
+		}
+
+		input.click();
+	} catch (err) {
+		console.error("Failed to parse file.");
+	}
+}
+
+
 function scryfallCardFromText(text) {
 	var lines = text.trim().split("\n");
 
