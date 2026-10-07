@@ -3449,7 +3449,13 @@ function mseManaToText(value) {
 	return mana.replace(/\d+\/[WUBRGC]|\d+|[WUBRGC]\/[WUBRGC]|[WUBRGC]\/P|P\/[WUBRGC]|[WUBRGCXYZSP]/gi, symbol => `{${symbol}}`);
 }
 
-async function addMseMarginExtension() {
+function mseRgbColor(color) {
+	const rgb = String(color || '').match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+	if (!rgb || rgb.slice(1).some(channel => Number(channel) > 255)) return null;
+	return `rgb(${rgb.slice(1).map(Number).join(',')})`;
+}
+
+async function addMseMarginExtension(borderColor) {
 	const autoLoadSetting = localStorage.getItem('autoLoadFrameVersion');
 	localStorage.setItem('autoLoadFrameVersion', 'false');
 	document.querySelector('#selectFrameGroup').value = 'Margin';
@@ -3460,6 +3466,29 @@ async function addMseMarginExtension() {
 		if (packLoad) await packLoad;
 		else await loadScript('/js/frames/packMargin-1.js');
 		await loadMarginVersion();
+
+		const coloredExtensionColor = mseRgbColor(borderColor);
+		if (coloredExtensionColor) {
+			const coloredExtension = availableFrames.find(frame => frame.name === 'Black Extension');
+			const borderlessExtension = availableFrames.find(frame => frame.name === 'Borderless Extension');
+			if (!coloredExtension || !borderlessExtension) {
+				throw new Error('The colored and borderless 1/8 inch margin extensions are unavailable.');
+			}
+			for (const frame of [
+				{
+					...coloredExtension,
+					name: 'MSE Colored Border Extension',
+					masks: [],
+					colorOverlayCheck: true,
+					colorOverlay: coloredExtensionColor
+				},
+				{...borderlessExtension, name: 'MSE Borderless Extension', masks: []}
+			]) {
+				card.frames.unshift(frame);
+				await addFrame([], frame);
+			}
+			return;
+		}
 
 		const extensionIndex = availableFrames.findIndex(frame => frame.name === 'Black Extension');
 		if (extensionIndex < 0) throw new Error('The black 1/8 inch margin extension frame is unavailable.');
@@ -3595,8 +3624,8 @@ async function applyMseNickname(alias, colors, typeLine) {
 
 async function applyMseBorderColor(borderColor, typeLine) {
 	if (!borderColor) return;
-	const rgb = String(borderColor).match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
-	if (!rgb || rgb.slice(1).some(channel => Number(channel) > 255)) {
+	const parsedColor = mseRgbColor(borderColor);
+	if (!parsedColor) {
 		console.warn(`Ignoring unsupported MSE border color "${borderColor}".`);
 		return;
 	}
@@ -3610,7 +3639,7 @@ async function applyMseBorderColor(borderColor, typeLine) {
 		src: '/img/black.png',
 		masks: [],
 		colorOverlayCheck: true,
-		colorOverlay: borderColor
+		colorOverlay: parsedColor
 	};
 	const originalFrameIndex = selectedFrameIndex;
 	availableFrames.push(borderFrame);
@@ -3902,7 +3931,7 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 			await Promise.all([ImageLoadTracker.waitForAll(), FontLoadTracker.waitForAll()]);
 			await drawText();
 			if (addMarginExtension) {
-				await addMseMarginExtension();
+				await addMseMarginExtension(mseCard.border_color);
 				await ImageLoadTracker.waitForAll();
 				await drawText();
 			}
