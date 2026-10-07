@@ -789,11 +789,13 @@ function cardFrameProperties(colors, manaCost, typeLine, power, style) {
 	}
 
 	var pt;
-	if (power) {
-		if (typeLine.includes('Vehicle')) {
+	if (power && /\b(?:Creature|Vehicle)\b/i.test(typeLine)) {
+		if (/\bVehicle\b/i.test(typeLine)) {
 			pt = 'V';
 		} else if (typeTitle == 'L') {
 			pt = 'C';
+		} else if (typeTitle.endsWith('L')) {
+			pt = typeTitle[0];
 		} else {
 			pt = typeTitle;
 		}
@@ -2009,6 +2011,25 @@ function writeText(textObject, targetContext) {
 						manaSymbolWidth *= textObject.manaImageScale;
 						manaSymbolHeight *= textObject.manaImageScale;
 					}
+					if (textObject.fitBounds && !textOneLine && textArcRadius == 0 &&
+						!textObject.manaPlacement && !textObject.manaLayout) {
+						const symbolAdvance = manaSymbolWidth + manaSymbolSpacing * 2;
+						if (currentX > startingCurrentX && currentX + symbolAdvance > textWidth) {
+							flushCurrentLine();
+							if (currentY > textHeight && startingTextSize > 1) {
+								startingTextSize -= 1;
+								continue outerloop;
+							}
+							manaSymbolX = currentX + canvasMargin + manaSymbolSpacing;
+						}
+						if (symbolAdvance > textWidth - startingCurrentX ||
+							currentY + textSize * 0.34 + manaSymbolHeight / 2 > textHeight) {
+							if (startingTextSize > 1) {
+								startingTextSize -= 1;
+								continue outerloop;
+							}
+						}
+					}
 					var backImage = null;
 					if (manaSymbol.backs) {
 						backImage = getManaSymbol('back' + Math.floor(Math.random() * manaSymbol.backs) + manaSymbol.back).image;
@@ -2192,22 +2213,8 @@ function writeText(textObject, targetContext) {
 				
 				manaSymbolsToRender = [];
 			}
-			if (wordToWrite && lineContext.font.endsWith('belerenb')) {
-				wordToWrite = wordToWrite.replace(/f(?:\s|$)/g, '\ue006').replace(/h(?:\s|$)/g, '\ue007').replace(/m(?:\s|$)/g, '\ue008').replace(/n(?:\s|$)/g, '\ue009').replace(/k(?:\s|$)/g, '\ue00a');
-			}
-
-			//if the word goes past the max line width, go to the next line
-			if (wordToWrite && lineContext.measureText(wordToWrite).width + currentX >= textWidth && textArcRadius == 0) {
-				if (textOneLine && startingTextSize > 1) {
-					//doesn't fit... try again at a smaller text size?
-					startingTextSize -= 1;
-					continue outerloop;
-				}
-				newLine = true;
-			}
-			//if we need a new line, go to the next line
-			if ((newLine && !textOneLine) || splitText.indexOf(word) == splitText.length - 1) {
-				var horizontalAdjust = 0
+			function flushCurrentLine() {
+				var horizontalAdjust = 0;
 				if (textAlign == 'center') {
 					horizontalAdjust = (textWidth - currentX) / 2;
 				} else if (textAlign == 'right') {
@@ -2222,7 +2229,6 @@ function writeText(textObject, targetContext) {
 				paragraphContext.drawImage(lineCanvas, horizontalAdjust, currentY);
 				lineY = 0;
 				lineContext.clearRect(0, 0, lineCanvas.width, lineCanvas.height);
-				// boxes for 'roll a d20' cards
 				if (savedRollYPosition != null && (newLineSpacing != 0 || !(newLine && !textOneLine))) {
 					if (savedRollYPosition != -1) {
 						paragraphContext.globalCompositeOperation = 'destination-over';
@@ -2236,11 +2242,32 @@ function writeText(textObject, targetContext) {
 						savedRollYPosition = null;
 					}
 				}
-				//reset
 				currentX = startingCurrentX;
 				currentY += textSize + newLineSpacing;
 				newLineSpacing = (textObject.lineSpacing || 0) * textSize;
 				newLine = false;
+			}
+			if (wordToWrite && lineContext.font.endsWith('belerenb')) {
+				wordToWrite = wordToWrite.replace(/f(?:\s|$)/g, '\ue006').replace(/h(?:\s|$)/g, '\ue007').replace(/m(?:\s|$)/g, '\ue008').replace(/n(?:\s|$)/g, '\ue009').replace(/k(?:\s|$)/g, '\ue00a');
+			}
+
+			if (textObject.fitBounds && wordToWrite && !textOneLine && textArcRadius == 0 &&
+				lineContext.measureText(wordToWrite).width > textWidth - startingCurrentX && startingTextSize > 1) {
+				startingTextSize -= 1;
+				continue outerloop;
+			}
+			//if the word goes past the max line width, go to the next line
+			if (wordToWrite && lineContext.measureText(wordToWrite).width + currentX >= textWidth && textArcRadius == 0) {
+				if (textOneLine && startingTextSize > 1) {
+					//doesn't fit... try again at a smaller text size?
+					startingTextSize -= 1;
+					continue outerloop;
+				}
+				newLine = true;
+			}
+			//if we need a new line, go to the next line
+			if ((newLine && !textOneLine) || splitText.indexOf(word) == splitText.length - 1) {
+				flushCurrentLine();
 			}
 			//if there's a word to write, it's not a space on a new line, and it's allowed to write words, then we write the word
 			if (wordToWrite && (currentX != startingCurrentX || wordToWrite != ' ') && !textManaCost) {
@@ -2725,7 +2752,7 @@ function fetchSetSymbol() {
 	if (document.querySelector('#lockSetSymbolCode').checked) {
 		localStorage.setItem('lockSetSymbolCode', setCode);
 	}
-	var setRarity = document.querySelector('#set-symbol-rarity').value.toLowerCase().replace('uncommon', 'u').replace('common', 'c').replace('rare', 'r').replace('mythic', 'm') || 'c';
+	var setRarity = document.querySelector('#set-symbol-rarity').value.toLowerCase().replace('uncommon', 'u').replace('common', 'c').replace('rare', 'r').replace('mythic', 'm').replace('masterpiece', 's') || 'c';
 	if (['a22', 'a23', 'j22', 'hlw'].includes(setCode.toLowerCase())) {
 		uploadSetSymbol(fixUri(`/img/setSymbols/custom/${setCode.toLowerCase()}-${setRarity}.png`), 'resetSetSymbol');
 	} else if (['cc', 'logan', 'joe'].includes(setCode.toLowerCase())) {
@@ -3453,14 +3480,16 @@ function mseRarityInfo(rarity) {
 		uncommon: 'uncommon',
 		rare: 'rare',
 		'mythic rare': 'mythic rare',
-		mythic: 'mythic rare'
+		mythic: 'mythic rare',
+		masterpiece: 'masterpiece'
 	};
 	const rarityCodes = {
 		common: 'C',
 		uncommon: 'U',
 		rare: 'R',
 		'mythic rare': 'M',
-		mythic: 'M'
+		mythic: 'M',
+		masterpiece: 'S'
 	};
 	return {
 		code: rarityCodes[normalizedRarity] || normalizedRarity.charAt(0).toUpperCase(),
@@ -3475,9 +3504,9 @@ function mseCardText(cardData) {
 	const type = [superType, subType].filter(Boolean).join(' — ');
 	const rules = mseMarkupToText(cardData.rule_text);
 	const flavor = mseMarkupToText(cardData.flavor_text);
-	const power = cardData.power;
-	const toughness = cardData.toughness;
-	const pt = power !== undefined && toughness !== undefined ? `${power}/${toughness}` : '';
+	const power = String(cardData.power ?? '').trim();
+	const toughness = String(cardData.toughness ?? '').trim();
+	const pt = power && toughness ? `${power}/${toughness}` : '';
 	const rulesText = [rules, flavor ? `{flavor}${flavor}` : ''].filter(Boolean).join('\n');
 	return {name, mana: mseManaToText(cardData.casting_cost), type, rules: rulesText, pt};
 }
@@ -3534,8 +3563,10 @@ function mseTextSlot(field) {
 async function applyMseNickname(alias, colors, typeLine) {
 	if (!alias) return;
 
+	const trueTitle = card.text.title.text;
 	await addTextbox('Nickname');
-	card.text.nickname.text = mseMarkupToText(alias);
+	card.text.title.text = mseMarkupToText(alias);
+	card.text.nickname.text = trueTitle;
 
 	let frameColor;
 	if (colors.length > 1) frameColor = 'M';
@@ -3550,14 +3581,16 @@ async function applyMseNickname(alias, colors, typeLine) {
 			M: 'Multicolored', A: 'Artifact', L: 'Land', C: 'Colorless'
 		}[frameColor]} Nickname`,
 		src: `/img/frames/m15/nickname/addons/m15NicknameTitle${frameColor}.png`,
-		masks: [
-			{name: 'Pinline', src: '/img/frames/m15/nickname/m15MaskNicknameTitleStrokeless.png'},
-			{name: 'True Title', src: '/img/frames/m15/nickname/m15NicknameMaskTrueName.png'}
-		],
 		bounds: {x: 0.0494, y: 0.0405, width: 0.9014, height: 0.1053}
 	};
-	card.frames.unshift(nicknameFrame);
-	await addFrame([], nicknameFrame);
+	for (const mask of [
+		{name: 'Pinline', src: '/img/frames/m15/nickname/m15MaskNicknameTitleStrokeless.png'},
+		{name: 'True Title', src: '/img/frames/m15/nickname/m15NicknameMaskTrueName.png'}
+	]) {
+		const maskedNicknameFrame = {...nicknameFrame, name: `${nicknameFrame.name} ${mask.name}`, masks: [mask]};
+		card.frames.unshift(maskedNicknameFrame);
+		await addFrame([], maskedNicknameFrame);
+	}
 }
 
 async function applyMseBorderColor(borderColor, typeLine) {
@@ -3630,6 +3663,7 @@ function constrainMseHeaderTextBounds(manaCost) {
 function constrainMseRulesTextBounds() {
 	const rules = card.text[mseTextSlot('rules')];
 	if (!rules) return;
+	rules.fitBounds = true;
 
 	const ptFrame = card.frames.find(frame => /power\/toughness/i.test(frame.name));
 	const ptText = card.text[mseTextSlot('pt')];
@@ -3817,7 +3851,7 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 			const infoSet = setInfo.set_code || '';
 			document.querySelector('#info-number').value = String(index + 1).padStart(useNewCollectorStyle ? 4 : 3, '0');
 			const rarity = mseRarityInfo(mseCard.rarity);
-			document.querySelector('#info-rarity').value = rarity.code;
+			document.querySelector('#info-rarity').value = rarity.code || 'C';
 			document.querySelector('#info-set').value = infoSet;
 			document.querySelector('#info-language').value = 'EN';
 			document.querySelector('#info-note').value = '';
