@@ -3482,6 +3482,44 @@ function mseCardText(cardData) {
 	return {name, mana: mseManaToText(cardData.casting_cost), type, rules: rulesText, pt};
 }
 
+function mseLandManaColors(typeLine, rulesText) {
+	if (!/\bLand\b/i.test(typeLine)) return [];
+
+	const colors = new Set();
+	const colorWords = {white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G'};
+	const addColorsFromExpression = expression => {
+		if (/\b(?:any\s+(?:one\s+)?color|choose\s+a\s+color|any\s+combination\s+of\s+colors)\b/i.test(expression)) {
+			'WUBRG'.split('').forEach(color => colors.add(color));
+			return;
+		}
+
+		for (const [, symbol] of expression.matchAll(/\{([^}]+)\}/g)) {
+			for (const color of symbol.toUpperCase()) {
+				if ('WUBRG'.includes(color)) colors.add(color);
+			}
+		}
+		for (const [word, color] of Object.entries(colorWords)) {
+			if (new RegExp(`\\b${word}\\b`, 'i').test(expression)) colors.add(color);
+		}
+	};
+
+	for (const [, expression] of rulesText.matchAll(/\badd\b([^.;\n]*)/gi)) {
+		addColorsFromExpression(expression);
+	}
+
+	const basicLandColors = {
+		plains: 'W',
+		island: 'U',
+		swamp: 'B',
+		mountain: 'R',
+		forest: 'G'
+	};
+	for (const [landType, color] of Object.entries(basicLandColors)) {
+		if (new RegExp(`\\b${landType}\\b`, 'i').test(typeLine)) colors.add(color);
+	}
+	return [...colors];
+}
+
 function mseTextSlot(field) {
 	const slotPatterns = {
 		name: /^(title|name)(2)?$/i,
@@ -3491,6 +3529,35 @@ function mseTextSlot(field) {
 		pt: /^(pt|power|toughness)(2)?$/i
 	};
 	return Object.keys(card.text || {}).find(key => slotPatterns[field].test(key));
+}
+
+async function applyMseNickname(alias, colors, typeLine) {
+	if (!alias) return;
+
+	await addTextbox('Nickname');
+	card.text.nickname.text = mseMarkupToText(alias);
+
+	let frameColor;
+	if (colors.length > 1) frameColor = 'M';
+	else if (colors.length === 1) frameColor = colors[0];
+	else if (/\bLand\b/i.test(typeLine)) frameColor = 'L';
+	else if (/\bArtifact\b/i.test(typeLine)) frameColor = 'A';
+	else frameColor = 'C';
+
+	const nicknameFrame = {
+		name: `${{
+			W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green',
+			M: 'Multicolored', A: 'Artifact', L: 'Land', C: 'Colorless'
+		}[frameColor]} Nickname`,
+		src: `/img/frames/m15/nickname/addons/m15NicknameTitle${frameColor}.png`,
+		masks: [
+			{name: 'Pinline', src: '/img/frames/m15/nickname/m15MaskNicknameTitleStrokeless.png'},
+			{name: 'True Title', src: '/img/frames/m15/nickname/m15NicknameMaskTrueName.png'}
+		],
+		bounds: {x: 0.0494, y: 0.0405, width: 0.9014, height: 0.1053}
+	};
+	card.frames.unshift(nicknameFrame);
+	await addFrame([], nicknameFrame);
 }
 
 async function applyMseBorderColor(borderColor, typeLine) {
@@ -3728,7 +3795,9 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 				const slot = mseTextSlot(field);
 				if (slot && values[field]) card.text[slot].text = values[field];
 			}
-			const frameColors = [...new Set(values.mana.toUpperCase().match(/[WUBRG]/g) || [])];
+			const frameColors = /\bLand\b/i.test(values.type)
+				? mseLandManaColors(values.type, values.rules)
+				: [...new Set(values.mana.toUpperCase().match(/[WUBRG]/g) || [])];
 			const selectedFrameType = document.querySelector('#autoFrame').value;
 			const frameType = selectedFrameType !== 'false' && getFrameTypeConfig(selectedFrameType)
 				? selectedFrameType
@@ -3736,6 +3805,7 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 			ImageLoadTracker.start();
 			FontLoadTracker.start();
 			await autoFrameUnified(frameType, frameColors, values.mana, values.type, values.pt);
+			await applyMseNickname(mseCard.alias, frameColors, values.type);
 			await applyMseBorderColor(mseCard.border_color, values.type);
 			const selectedText = card.text[Object.keys(card.text)[selectedTextIndex]];
 			if (selectedText) {
@@ -3769,7 +3839,7 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 			if (!document.querySelector('#lockSetSymbolURL').checked) {
 				const symbolPath = rarity.icon
 					? `/local_art/testfiles/seticon/set-symbol-${encodeURIComponent(rarity.icon)}.png`
-					: '/local_art/testfiles/seticon/set-symbol.png';
+					: '/local_art/testfiles/seticon/set-symbol-common.png';
 				if (!rarity.icon) {
 					console.warn(`No set icon for MSE rarity "${mseCard.rarity}"; using the generic set icon.`);
 				}
