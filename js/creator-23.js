@@ -3411,6 +3411,7 @@ function mseMarkupToText(value) {
 		.replace(/&amp;/g, '&')
 		.replace(/&lt;/g, '<')
 		.replace(/&gt;/g, '>')
+		.replace(/[ \t]+/g, ' ')
 		.trim();
 }
 
@@ -3490,6 +3491,68 @@ function mseTextSlot(field) {
 		pt: /^(pt|power|toughness)(2)?$/i
 	};
 	return Object.keys(card.text || {}).find(key => slotPatterns[field].test(key));
+}
+
+function constrainMseHeaderTextBounds(manaCost) {
+	const title = card.text[mseTextSlot('name')];
+	const mana = card.text[mseTextSlot('mana')];
+	if (title && mana && manaCost) {
+		const manaSymbolCount = (manaCost.match(/\{[^}]+\}/g) || []).length;
+		const manaTextSize = mana.size || 0.038;
+		const manaSymbolWidth = manaTextSize * card.height * 0.78 / card.width;
+		const manaSpacing = manaTextSize * card.height * 0.08 / card.width;
+		const manaWidth = manaSymbolCount * (manaSymbolWidth + manaSpacing);
+		const manaRight = (mana.x || 0) + (mana.width || 1);
+		const titleRight = (title.x || 0) + (title.width || 1);
+		const rowsOverlap = (title.y || 0) < (mana.y || 0) + (mana.height || 1) &&
+			(mana.y || 0) < (title.y || 0) + (title.height || 1);
+		if (rowsOverlap && titleRight > manaRight - manaWidth) {
+			title.width = Math.max(0, manaRight - manaWidth - 0.01 - (title.x || 0));
+		}
+	}
+
+	const type = card.text[mseTextSlot('type')];
+	if (!type || !card.setSymbolBounds || !setSymbol.naturalWidth || !setSymbol.naturalHeight) return;
+	const symbol = {
+		x: card.setSymbolX || 0,
+		y: card.setSymbolY || 0,
+		width: setSymbol.naturalWidth * (card.setSymbolZoom || 1) / card.width,
+		height: setSymbol.naturalHeight * (card.setSymbolZoom || 1) / card.height
+	};
+	const typeX = type.x || 0;
+	const typeY = type.y || 0;
+	const typeRight = typeX + (type.width || 1);
+	const typeBottom = typeY + (type.height || 1);
+	if (typeY < symbol.y + symbol.height && symbol.y < typeBottom &&
+		typeX < symbol.x + symbol.width && symbol.x < typeRight) {
+		type.width = Math.max(0, symbol.x - 0.01 - typeX);
+	}
+}
+
+function constrainMseRulesTextBounds() {
+	const rules = card.text[mseTextSlot('rules')];
+	if (!rules) return;
+
+	const ptFrame = card.frames.find(frame => /power\/toughness/i.test(frame.name));
+	const ptText = card.text[mseTextSlot('pt')];
+	const ptBounds = ptFrame?.bounds || (ptText && {
+		x: ptText.x,
+		y: ptText.y,
+		width: ptText.width,
+		height: ptText.height
+	});
+	if (!ptBounds || ptBounds.y === undefined) return;
+
+	const rulesX = rules.x || 0;
+	const rulesRight = rulesX + (rules.width || 1);
+	const ptX = ptBounds.x || 0;
+	const ptRight = ptX + (ptBounds.width || 1);
+	const horizontalOverlap = rulesX < ptRight && ptX < rulesRight;
+	const rulesBottom = (rules.y || 0) + (rules.height || 1);
+	const safeRulesBottom = ptBounds.y - 0.01;
+	if (horizontalOverlap && rulesBottom > safeRulesBottom) {
+		rules.height = Math.max(0, safeRulesBottom - (rules.y || 0));
+	}
 }
 
 function mseImageFile(imageName, files) {
@@ -3696,6 +3759,8 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 			if (!document.querySelector('#lockSetSymbolURL').checked && setSymbol.decode) {
 				await setSymbol.decode();
 			}
+			constrainMseHeaderTextBounds(values.mana);
+			constrainMseRulesTextBounds();
 
 			await drawText();
 			await Promise.all([ImageLoadTracker.waitForAll(), FontLoadTracker.waitForAll()]);
