@@ -1,4 +1,4 @@
-loadFramePacks([
+window.marginPackLoadPromise = loadFramePacks([
 	{name:'Generic Margins', value:'Margin-1'},
 	{name:'Sewer (TMT) Margins', value:'MarginSewerTMT'},
 	{name:'Fable (ECL) Margins', value:'MarginFableECL'},

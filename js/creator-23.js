@@ -566,7 +566,7 @@ function loadFramePacks(framePackOptions = []) {
 		}
 		document.querySelector('#selectFramePack').appendChild(framePackOption);
 	});
-	loadScript("/js/frames/pack" + document.querySelector('#selectFramePack').value + ".js");
+	return loadScript("/js/frames/pack" + document.querySelector('#selectFramePack').value + ".js");
 }
 function loadFramePack(frameOptions = availableFrames) {
 	resetDoubleClick();
@@ -2480,13 +2480,13 @@ async function addTextbox(textboxType) {
 //ART TAB
 function uploadArt(imageSource, otherParams) {
 	ImageLoadTracker.track(imageSource);
-	art.src = imageSource;
 	if (otherParams && otherParams == 'autoFit') {
 		art.onload = function() {
 			autoFitArt();
 			art.onload = artEdited;
 		};
 	}
+	art.src = imageSource;
 }
 async function pasteArt() {
   try {
@@ -3358,20 +3358,409 @@ async function pasteCardText() {
   }
 }
 
-async function uploadMseSet() {
-	try {
-		var input = document.createElement('input');
-		input.type = 'file';
+async function uploadMseSet(directory = false) {
+	const input = document.createElement('input');
+	input.type = 'file';
+	input.multiple = true;
+	if (directory) {
+		input.setAttribute('webkitdirectory', '');
+	} else {
+		input.accept = '.mse-set,.json,text/plain,image/*';
+	}
 
-		input.onchange = e => {
-			// Get the file reference
-			var set = new MseSet(e.target.files[0]);
-			// set.setFrame();
+	input.onchange = async event => {
+		const files = Array.from(event.target.files || []);
+		const sourceFiles = files.filter(file => file.name === 'set' || /\.(mse-set|json)$/i.test(file.name));
+		if (!sourceFiles.length) {
+			notify('No MSE set or JSON file was selected.', 5);
+			return;
 		}
 
-		input.click();
-	} catch (err) {
-		console.error("Failed to parse file.");
+		try {
+			const mseCards = [];
+			for (const file of sourceFiles) {
+				const set = new MseSet(file);
+				const parsed = await set.load();
+				files.push(...set.assets);
+				const cards = Array.isArray(parsed.cards) ? parsed.cards : parsed.card ? parsed.card : [parsed];
+				const setCards = Array.isArray(cards) ? cards : [cards];
+				setCards.forEach(cardData => {
+					if (cardData && typeof cardData === 'object') cardData._setInfo = parsed.set_info || {};
+				});
+				mseCards.push(...setCards);
+			}
+			await generateMseCardImages(mseCards, files, sourceFiles[0]);
+		} catch (error) {
+			console.error('Failed to parse or generate MSE cards:', error);
+			notify(`MSE import failed: ${error.message}`, 8);
+		}
+	};
+
+	input.click();
+}
+
+function mseMarkupToText(value) {
+	if (Array.isArray(value)) value = value.join('\n');
+	return String(value || '')
+		.replace(/<sym(?:-auto)?>(.*?)<\/sym(?:-auto)?>/gi, (_, mana) => mseManaToText(mana))
+		.replace(/<i-auto>/gi, '{i}')
+		.replace(/<\/i-auto>/gi, '{/i}')
+		.replace(/<atom-sep\s*\/?>/gi, ' ')
+		.replace(/<br\s*\/?>/gi, '\n')
+		.replace(/<[^>]*>/g, '')
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.trim();
+}
+
+function mseManaToText(value) {
+	const mana = mseMarkupToText(value);
+	if (mana.trim().toUpperCase() === 'T') return '{t}';
+	if (!mana || mana.includes('{')) return mana;
+	return mana.replace(/\d+\/[WUBRGC]|\d+|[WUBRGC]\/[WUBRGC]|[WUBRGC]\/P|P\/[WUBRGC]|[WUBRGCXYZSP]/gi, symbol => `{${symbol}}`);
+}
+
+async function addMseMarginExtension() {
+	const autoLoadSetting = localStorage.getItem('autoLoadFrameVersion');
+	localStorage.setItem('autoLoadFrameVersion', 'false');
+	document.querySelector('#selectFrameGroup').value = 'Margin';
+
+	try {
+		await loadScript('/js/frames/groupMargin.js');
+		const packLoad = window.marginPackLoadPromise;
+		if (packLoad) await packLoad;
+		else await loadScript('/js/frames/packMargin-1.js');
+		await loadMarginVersion();
+
+		const extensionIndex = availableFrames.findIndex(frame => frame.name === 'Black Extension');
+		if (extensionIndex < 0) throw new Error('The black 1/8 inch margin extension frame is unavailable.');
+		const extensionOption = document.querySelectorAll('#frame-picker .frame-option')[extensionIndex];
+		if (!extensionOption) throw new Error('Could not select the black margin extension frame.');
+		extensionOption.click();
+		await addFrame();
+	} finally {
+		if (autoLoadSetting === null) localStorage.removeItem('autoLoadFrameVersion');
+		else localStorage.setItem('autoLoadFrameVersion', autoLoadSetting);
+	}
+}
+
+function mseRarityInfo(rarity) {
+	const normalizedRarity = mseMarkupToText(rarity).toLowerCase().trim();
+	const rarityAssets = {
+		common: 'common',
+		uncommon: 'uncommon',
+		rare: 'rare',
+		'mythic rare': 'mythic rare',
+		mythic: 'mythic rare'
+	};
+	const rarityCodes = {
+		common: 'C',
+		uncommon: 'U',
+		rare: 'R',
+		'mythic rare': 'M',
+		mythic: 'M'
+	};
+	return {
+		code: rarityCodes[normalizedRarity] || normalizedRarity.charAt(0).toUpperCase(),
+		icon: rarityAssets[normalizedRarity] || null
+	};
+}
+
+function mseCardText(cardData) {
+	const name = mseMarkupToText(cardData.name);
+	const superType = mseMarkupToText(cardData.super_type);
+	const subType = mseMarkupToText(cardData.sub_type);
+	const type = [superType, subType].filter(Boolean).join(' — ');
+	const rules = mseMarkupToText(cardData.rule_text);
+	const flavor = mseMarkupToText(cardData.flavor_text);
+	const power = cardData.power;
+	const toughness = cardData.toughness;
+	const pt = power !== undefined && toughness !== undefined ? `${power}/${toughness}` : '';
+	const rulesText = [rules, flavor ? `{flavor}${flavor}` : ''].filter(Boolean).join('\n');
+	return {name, mana: mseManaToText(cardData.casting_cost), type, rules: rulesText, pt};
+}
+
+function mseTextSlot(field) {
+	const slotPatterns = {
+		name: /^(title|name)(2)?$/i,
+		mana: /^(mana|cost)(2)?$/i,
+		type: /^type(2)?$/i,
+		rules: /^(rules|rule|text)(2)?$/i,
+		pt: /^(pt|power|toughness)(2)?$/i
+	};
+	return Object.keys(card.text || {}).find(key => slotPatterns[field].test(key));
+}
+
+function mseImageFile(imageName, files) {
+	if (!imageName) return null;
+	const requestedName = String(imageName).toLowerCase();
+	const exactMatch = files.find(file => file.name.toLowerCase() === requestedName);
+	if (exactMatch) return exactMatch;
+	const target = requestedName.replace(/\.[^.]+$/, '');
+	return files.find(file => file.name.replace(/\.[^.]+$/, '').toLowerCase() === target) || null;
+}
+
+async function mseImageObjectUrl(file) {
+	const extension = file.name.split('.').pop().toLowerCase();
+	const knownTypes = {
+		png: 'image/png',
+		jpg: 'image/jpeg',
+		jpeg: 'image/jpeg',
+		gif: 'image/gif',
+		webp: 'image/webp',
+		bmp: 'image/bmp'
+	};
+	const signature = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+	let type = knownTypes[extension];
+	if (!type && signature[0] === 0x89 && signature[1] === 0x50 && signature[2] === 0x4e && signature[3] === 0x47) {
+		type = 'image/png';
+	} else if (!type && signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff) {
+		type = 'image/jpeg';
+	} else if (!type && String.fromCharCode(...signature.slice(0, 4)) === 'RIFF' && String.fromCharCode(...signature.slice(8, 12)) === 'WEBP') {
+		type = 'image/webp';
+	}
+	if (!type && file.type.startsWith('image/')) type = file.type;
+	return URL.createObjectURL(type ? new Blob([file], {type}) : file);
+}
+
+async function mseImageSource(file) {
+	const relativePath = (file.webkitRelativePath || '').split('/').filter(segment => segment && segment !== '.' && segment !== '..');
+	if (relativePath.length) {
+		if (relativePath[0] !== 'testfiles') relativePath.unshift('testfiles');
+		const imageUrl = `/local_art/${relativePath.map(encodeURIComponent).join('/')}`;
+		try {
+			const response = await fetch(imageUrl, {method: 'HEAD'});
+			if (response.ok) return imageUrl;
+			console.warn(`No local art found at ${imageUrl}; using the uploaded image data.`);
+		} catch (error) {
+			console.warn(`Could not check local art at ${imageUrl}; using the uploaded image data.`, error);
+		}
+	}
+	return mseImageObjectUrl(file);
+}
+
+async function loadMseArtwork(imageSource, fallbackFile) {
+	const loadSource = async source => {
+		uploadArt(source, 'autoFit');
+		if (art.decode) {
+			await art.decode();
+		} else if (!art.complete) {
+			await new Promise((resolve, reject) => {
+				art.addEventListener('load', resolve, {once: true});
+				art.addEventListener('error', () => reject(new Error(`Could not load artwork from ${source}.`)), {once: true});
+			});
+		}
+		const expectedSource = new URL(source, document.baseURI).href;
+		if (art.src !== expectedSource || !art.naturalWidth || !art.naturalHeight) {
+			throw new Error(`Could not load artwork from ${source}.`);
+		}
+		autoFitArt();
+		art.onload = artEdited;
+	};
+
+	try {
+		await loadSource(imageSource);
+		return null;
+	} catch (error) {
+		if (!fallbackFile || imageSource.startsWith('blob:')) throw error;
+		console.warn(`Could not load artwork from ${imageSource}; retrying the uploaded file.`, error);
+		const fallbackSource = await mseImageObjectUrl(fallbackFile);
+		await loadSource(fallbackSource);
+		return fallbackSource;
+	}
+}
+
+function mseFileName(name, fallback) {
+	const safeName = String(name || fallback).replace(/[\\/:*?"<>|]/g, '_').trim();
+	return `${safeName || fallback}.png`;
+}
+
+function mseCanvasPngBlob(canvas) {
+	return new Promise((resolve, reject) => {
+		canvas.toBlob(blob => {
+			if (blob) resolve(blob);
+			else reject(new Error('Could not encode a generated card as PNG.'));
+		}, 'image/png');
+	});
+}
+
+async function generateMseCardImages(mseCards, files, sourceFile) {
+	const namedCards = mseCards.filter(mseCard =>
+		mseCard && typeof mseCard === 'object' && mseCard.name
+	);
+	if (!namedCards.length) throw new Error('The selected MSE set contains no named cards.');
+	if (!card.text || !mseTextSlot('name') || !mseTextSlot('rules')) {
+		throw new Error('Load a card frame with title and rules text boxes before importing an MSE set.');
+	}
+	if (typeof JSZip === 'undefined' && namedCards.length > 1) {
+		throw new Error('The ZIP library has not loaded yet. Please wait a moment and try again.');
+	}
+
+	const tempKey = `__mse_import_state_${Date.now()}__`;
+	const originalCard = JSON.parse(JSON.stringify(card));
+	originalCard.frames.forEach(frame => {
+		delete frame.image;
+		frame.masks.forEach(mask => delete mask.image);
+	});
+	localStorage.setItem(tempKey, JSON.stringify(originalCard));
+
+	const useZip = namedCards.length > 1;
+	const zipBatchSize = 10;
+	const totalZipBatches = Math.ceil(namedCards.length / zipBatchSize);
+	const zipBaseName = mseFileName(sourceFile.name.replace(/\.[^.]+$/, ''), 'mse-set').replace(/\.png$/, '');
+	let zip = useZip ? new JSZip() : null;
+	let zipBatchCount = 0;
+	let zipBatchIndex = 0;
+	const objectUrls = [];
+	const outputNames = new Set();
+	let generatedCount = 0;
+	let missingArtworkCount = 0;
+	const useNewCollectorStyle = document.querySelector('#enableNewCollectorStyle').checked;
+	const addMarginExtension = document.querySelector('#mse-margin-extension').checked;
+
+	try {
+		await setBottomInfoStyle();
+		for (const [index, mseCard] of namedCards.entries()) {
+			if (index > 0) {
+				await loadCard(tempKey);
+				await setBottomInfoStyle();
+			}
+			notify(`Rendering card ${index + 1} of ${namedCards.length}: ${mseCard.name}`, 1);
+
+			const values = mseCardText(mseCard);
+			Object.values(card.text).forEach(textObject => { textObject.text = ''; });
+			for (const field of Object.keys(values)) {
+				const slot = mseTextSlot(field);
+				if (slot && values[field]) card.text[slot].text = values[field];
+			}
+			const frameColors = [...new Set(values.mana.toUpperCase().match(/[WUBRG]/g) || [])];
+			const selectedFrameType = document.querySelector('#autoFrame').value;
+			const frameType = selectedFrameType !== 'false' && getFrameTypeConfig(selectedFrameType)
+				? selectedFrameType
+				: 'M15Regular-1';
+			ImageLoadTracker.start();
+			FontLoadTracker.start();
+			await autoFrameUnified(frameType, frameColors, values.mana, values.type, values.pt);
+			const selectedText = card.text[Object.keys(card.text)[selectedTextIndex]];
+			if (selectedText) {
+				document.querySelector('#text-editor').value = selectedText.text;
+				document.querySelector('#text-editor-font-size').value = selectedText.fontSize || 0;
+			}
+
+			const setInfo = mseCard._setInfo || {};
+			const infoSet = setInfo.set_code || '';
+			document.querySelector('#info-number').value = String(index + 1).padStart(useNewCollectorStyle ? 4 : 3, '0');
+			const rarity = mseRarityInfo(mseCard.rarity);
+			document.querySelector('#info-rarity').value = rarity.code;
+			document.querySelector('#info-set').value = infoSet;
+			document.querySelector('#info-language').value = 'EN';
+			document.querySelector('#info-note').value = '';
+			document.querySelector('#info-year').value = new Date().getFullYear();
+			artistEdited(mseMarkupToText(mseCard.artist || mseCard.illustrator || ''));
+			if (!document.querySelector('#lockSetSymbolCode').checked) {
+				document.querySelector('#set-symbol-code').value = infoSet;
+			}
+			document.querySelector('#set-symbol-rarity').value = rarity.code;
+			if (!card.setSymbolBounds) {
+				card.setSymbolBounds = {
+					x: 0.046,
+					y: 0.9548,
+					width: 0.014,
+					height: 0.0171,
+					vertical: 'center'
+				};
+			}
+			if (!document.querySelector('#lockSetSymbolURL').checked) {
+				const symbolPath = rarity.icon
+					? `/local_art/testfiles/seticon/set-symbol-${encodeURIComponent(rarity.icon)}.png`
+					: '/local_art/testfiles/seticon/set-symbol.png';
+				if (!rarity.icon) {
+					console.warn(`No set icon for MSE rarity "${mseCard.rarity}"; using the generic set icon.`);
+				}
+				uploadSetSymbol(fixUri(symbolPath), 'resetSetSymbol');
+			}
+
+			const imageFile = mseImageFile(mseCard.image, files);
+			if (imageFile) {
+				const imageSource = await mseImageSource(imageFile);
+				if (imageSource.startsWith('blob:')) objectUrls.push(imageSource);
+				const fallbackSource = await loadMseArtwork(imageSource, imageFile);
+				if (fallbackSource) objectUrls.push(fallbackSource);
+			} else if (/^(https?:|data:|\/)/i.test(String(mseCard.image || ''))) {
+				await loadMseArtwork(mseCard.image);
+			} else {
+				if (mseCard.image) missingArtworkCount++;
+				uploadArt('/img/blank.png');
+			}
+			if (!document.querySelector('#lockSetSymbolURL').checked && setSymbol.decode) {
+				await setSymbol.decode();
+			}
+
+			await drawText();
+			await Promise.all([ImageLoadTracker.waitForAll(), FontLoadTracker.waitForAll()]);
+			await drawText();
+			if (addMarginExtension) {
+				await addMseMarginExtension();
+				await ImageLoadTracker.waitForAll();
+				await drawText();
+			}
+			ImageLoadTracker.stop();
+			FontLoadTracker.stop();
+
+			let imageName = mseFileName(values.name, `card-${index + 1}`);
+			let suffix = 2;
+			while (outputNames.has(imageName.toLowerCase())) {
+				imageName = mseFileName(`${values.name} (${suffix++})`, `card-${index + 1}`);
+			}
+			outputNames.add(imageName.toLowerCase());
+
+			const imageBlob = await mseCanvasPngBlob(cardCanvas);
+			if (zip) {
+				zip.file(imageName, imageBlob);
+				zipBatchCount++;
+				if (zipBatchCount === zipBatchSize || index === namedCards.length - 1) {
+					const content = await zip.generateAsync({type: 'blob'});
+					const download = document.createElement('a');
+					const zipUrl = URL.createObjectURL(content);
+					download.href = zipUrl;
+					download.download = totalZipBatches === 1
+						? `${zipBaseName}.zip`
+						: `${zipBaseName}-part-${String(++zipBatchIndex).padStart(3, '0')}-of-${String(totalZipBatches).padStart(3, '0')}.zip`;
+					document.body.appendChild(download);
+					download.click();
+					download.remove();
+					setTimeout(() => URL.revokeObjectURL(zipUrl), 1000);
+					zip = index < namedCards.length - 1 ? new JSZip() : null;
+					zipBatchCount = 0;
+				}
+			} else {
+				const download = document.createElement('a');
+				download.href = URL.createObjectURL(imageBlob);
+				download.download = imageName;
+				document.body.appendChild(download);
+				download.click();
+				download.remove();
+				setTimeout(() => URL.revokeObjectURL(download.href), 1000);
+			}
+			generatedCount++;
+			objectUrls.splice(0).forEach(url => URL.revokeObjectURL(url));
+		}
+
+		if (!generatedCount) throw new Error('No cards could be rendered from the selected MSE set.');
+		let summary = `Generated ${generatedCount} card image${generatedCount === 1 ? '' : 's'}.`;
+		if (totalZipBatches > 1) summary += ` Downloaded in ${totalZipBatches} ZIP files with up to ${zipBatchSize} cards each.`;
+		if (missingArtworkCount) summary += ` ${missingArtworkCount} card${missingArtworkCount === 1 ? '' : 's'} used blank artwork because its image was not found.`;
+		notify(summary, 8);
+	} finally {
+		ImageLoadTracker.stop();
+		FontLoadTracker.stop();
+		objectUrls.forEach(url => URL.revokeObjectURL(url));
+		try {
+			await loadCard(tempKey);
+		} finally {
+			localStorage.removeItem(tempKey);
+		}
 	}
 }
 

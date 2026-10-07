@@ -696,7 +696,13 @@
 						</div>
 						<div class='readable-background margin-bottom padding'>
 							<h5 class='padding margin-bottom input-description'>Import MSE Card</h5>
-							<button class='input margin-bottom' onclick='uploadMseSet();'>Upload Cards File</button>
+							<h5 class='padding margin-bottom input-description'>Generated images use a color-matched frame. Choose an automatic frame style above, or the regular frame is used by default. Single cards download as PNG; multi-card sets download as a ZIP.</h5>
+							<label class='checkbox-container input margin-bottom'>Add 1/8 inch black frame extension
+								<input id='mse-margin-extension' type='checkbox'>
+								<span class='checkmark'></span>
+							</label>
+							<button class='input margin-bottom' onclick='uploadMseSet();'>Upload MSE Set File</button>
+							<button class='input margin-bottom' onclick='uploadMseSet(true);'>Upload MSE Set Folder</button>
 						</div>
 						<div class='readable-background margin-bottom padding'>
 							<h5 class='padding margin-bottom input-description'>Paste full text</h5>
@@ -986,5 +992,5 @@
 	<script defer src='/js/autoFrame.js'></script>
 	<script defer src='/js/creator-23.js'></script>
 	<script defer src='/js/frameSearch.js'></script>
-	<script defer src='/js/mseparser.js'
+	<script defer src='/js/mseparser.js'></script>
 <!-- END OF CONTENT -->
