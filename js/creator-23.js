@@ -3493,6 +3493,37 @@ function mseTextSlot(field) {
 	return Object.keys(card.text || {}).find(key => slotPatterns[field].test(key));
 }
 
+async function applyMseBorderColor(borderColor, typeLine) {
+	if (!borderColor) return;
+	const rgb = String(borderColor).match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+	if (!rgb || rgb.slice(1).some(channel => Number(channel) > 255)) {
+		console.warn(`Ignoring unsupported MSE border color "${borderColor}".`);
+		return;
+	}
+
+	const isLegendary = /\bLegendary\b/i.test(typeLine);
+	const borderMask = isLegendary
+		? '/img/frames/m15/m15MaskBorderSliverCrown.png'
+		: '/img/frames/m15/m15MaskBorderSliver.png';
+	const borderFrame = {
+		name: 'Regular Colored Border',
+		src: '/img/black.png',
+		masks: [],
+		colorOverlayCheck: true,
+		colorOverlay: borderColor
+	};
+	const originalFrameIndex = selectedFrameIndex;
+	availableFrames.push(borderFrame);
+	selectedFrameIndex = availableFrames.length - 1;
+
+	try {
+		await addFrame([{name: isLegendary ? 'Border (With Crown)' : 'Border', src: borderMask}]);
+	} finally {
+		availableFrames.pop();
+		selectedFrameIndex = originalFrameIndex;
+	}
+}
+
 function constrainMseHeaderTextBounds(manaCost) {
 	const title = card.text[mseTextSlot('name')];
 	const mana = card.text[mseTextSlot('mana')];
@@ -3705,6 +3736,7 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 			ImageLoadTracker.start();
 			FontLoadTracker.start();
 			await autoFrameUnified(frameType, frameColors, values.mana, values.type, values.pt);
+			await applyMseBorderColor(mseCard.border_color, values.type);
 			const selectedText = card.text[Object.keys(card.text)[selectedTextIndex]];
 			if (selectedText) {
 				document.querySelector('#text-editor').value = selectedText.text;
