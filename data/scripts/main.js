@@ -1023,7 +1023,7 @@ function toggleTabs(clickedElement, targetId) {
 }
 
 function downloadCardImage(linkElement) {
-	if (document.getElementById("inputInfoArtist").value.replace(/ /g, "") != "") {
+	// if (document.getElementById("inputInfoArtist").value.replace(/ /g, "") != "") {
 		var savedFileName = ''
 		if (cardTextList[0].name == 'Card Nickname') {
 			savedFileName = cardTextList[1].text + ' (' + cardTextList[0].text + ").png"
@@ -1034,10 +1034,10 @@ function downloadCardImage(linkElement) {
 		if (linkElement.download == ".png") {
 			linkElement.download = "card.png"
 		}
-	} else {
-		event.preventDefault()
-		notify("You must properly credit an artist before downloading!", '#ffaaaae0')
-	}
+	// } else {
+	// 	event.preventDefault()
+	// 	notify("You must properly credit an artist before downloading!", '#ffaaaae0')
+	// }
 	var cardImageData = mainCanvas.toDataURL()
 	if (cardImageData == undefined) {
 		notify("Sorry, but it seems that you cannot download your card. Please try using a different browser/device.", '#ffffaae0')

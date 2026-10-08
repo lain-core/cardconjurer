@@ -3188,9 +3188,9 @@ function drawCard() {
 }
 //DOWNLOADING
 function downloadCard(alt = false, jpeg = false) {
-	if (card.infoArtist.replace(/ /g, '') == '' && !card.artSource.includes('/img/blank.png') && !card.artZoom == 0) {
-		notify('You must credit an artist before downloading!', 5);
-	} else {
+	// if (card.infoArtist.replace(/ /g, '') == '' && !card.artSource.includes('/img/blank.png') && !card.artZoom == 0) {
+	// 	notify('You must credit an artist before downloading!', 5);
+	// } else {
 		// Prep file information
 		var imageDataURL;
 		var imageName = getCardName();
@@ -3219,7 +3219,7 @@ function downloadCard(alt = false, jpeg = false) {
 			downloadElement.click();
 			downloadElement.remove();
 		}
-	}
+	//}
 }
 async function bulkDownloadZip() {
     // 1. Initial checks for libraries and saved cards.
@@ -3428,7 +3428,7 @@ async function uploadMseSet(directory = false) {
 
 function mseMarkupToText(value) {
 	if (Array.isArray(value)) value = value.join('\n');
-	return String(value || '')
+	return String(value ?? '')
 		.replace(/<sym(?:-auto)?>(.*?)<\/sym(?:-auto)?>/gi, (_, mana) => mseManaToText(mana))
 		.replace(/<i-auto>/gi, '{i}')
 		.replace(/<\/i-auto>/gi, '{/i}')
@@ -3810,6 +3810,7 @@ function mseCanvasPngBlob(canvas) {
 }
 
 async function generateMseCardImages(mseCards, files, sourceFile) {
+	const defaultArtist = document.querySelector('#info-artist').value;
 	const namedCards = mseCards.filter(mseCard =>
 		mseCard && typeof mseCard === 'object' && mseCard.name
 	);
@@ -3842,6 +3843,7 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 	let missingArtworkCount = 0;
 	const useNewCollectorStyle = document.querySelector('#enableNewCollectorStyle').checked;
 	const addMarginExtension = document.querySelector('#mse-margin-extension').checked;
+	const addNotForSaleToNote = document.querySelector('#mse-not-for-sale').checked;
 
 	try {
 		await setBottomInfoStyle();
@@ -3878,14 +3880,17 @@ async function generateMseCardImages(mseCards, files, sourceFile) {
 
 			const setInfo = mseCard._setInfo || {};
 			const infoSet = setInfo.set_code || '';
-			document.querySelector('#info-number').value = String(index + 1).padStart(useNewCollectorStyle ? 4 : 3, '0');
+			const imageNumber = String(mseCard.image || '').match(/(\d+)(?:\.[^./\\]+)?$/)?.[1];
+			document.querySelector('#info-number').value = imageNumber
+				? imageNumber.padStart(4, '0')
+				: String(index + 1).padStart(useNewCollectorStyle ? 4 : 3, '0');
 			const rarity = mseRarityInfo(mseCard.rarity);
 			document.querySelector('#info-rarity').value = rarity.code || 'C';
 			document.querySelector('#info-set').value = infoSet;
 			document.querySelector('#info-language').value = 'EN';
-			document.querySelector('#info-note').value = '';
+			document.querySelector('#info-note').value = addNotForSaleToNote ? 'Not for Sale' : '';
 			document.querySelector('#info-year').value = new Date().getFullYear();
-			artistEdited(mseMarkupToText(mseCard.artist || mseCard.illustrator || ''));
+			artistEdited(mseMarkupToText(mseCard.artist || mseCard.illustrator || defaultArtist));
 			if (!document.querySelector('#lockSetSymbolCode').checked) {
 				document.querySelector('#set-symbol-code').value = infoSet;
 			}
